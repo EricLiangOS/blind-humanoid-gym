@@ -36,7 +36,17 @@ from .base.legged_robot import LeggedRobot
 from .custom.humanoid_config import XBotLCfg, XBotLCfgPPO
 from .custom.humanoid_env import XBotLFreeEnv
 
+from .custom.humanoid_config_jointvel_mask import XBotLCfgJointVelMask, XBotLCfgPPOJointVelMask
+from .custom.humanoid_env_jointvel_mask import XBotLJointVelMaskEnv
+
 from humanoid.utils.task_registry import task_registry
 
 
 task_registry.register( "humanoid_ppo", XBotLFreeEnv, XBotLCfg(), XBotLCfgPPO() )
+
+task_registry.register(
+    "humanoid_ppo_jointvel_mask",
+    XBotLJointVelMaskEnv,
+    XBotLCfgJointVelMask(),
+    XBotLCfgPPOJointVelMask()
+)
