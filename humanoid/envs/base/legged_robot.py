@@ -214,8 +214,10 @@ class LeggedRobot(BaseTask):
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
         self.fall_counter[env_ids] = 0
+        self.hit_counter[env_ids] = 0
         # fill extras
         self.extras["episode"] = {}
+        self.extras["episode"]["hit_count"] = torch.mean(self.hit_counter[env_ids].float())
         for key in self.episode_sums.keys():
             self.extras["episode"]['rew_' + key] = torch.mean(self.episode_sums[key][env_ids]) / self.max_episode_length_s
             self.episode_sums[key][env_ids] = 0.
@@ -347,6 +349,28 @@ class LeggedRobot(BaseTask):
 
         if self.projectile_active.any():
             self.projectile_age[self.projectile_active] += 1
+
+            # Check for projectile collisions with the robot
+            # Each projectile is a single rigid body spawned after the robot's self.num_bodies bodies.
+            # So projectile j corresponds to body index `self.num_bodies + j` in the environment.
+            for j in range(self.projectile_count):
+                active_j = self.projectile_active[:, j]
+                if not active_j.any():
+                    continue
+
+                # Query actor state for active projectile coordinates
+                proj_actor_idx = self.projectile_actor_indices[:, j]
+                proj_z = self.actor_root_state[proj_actor_idx, 2]
+
+                # Query net contact force magnitude on this projectile's rigid body
+                proj_force = torch.norm(self.contact_forces[:, self.num_bodies + j, :], dim=-1)
+
+                # Heuristic: active, force threshold exceeded (> 1.0 N), and height > 0.08 m (avoiding ground contact)
+                hit = active_j & (proj_force > 1.0) & (proj_z > 0.08)
+                if hit.any():
+                    self.hit_counter[hit] += 1
+                    # Force expiration immediately to trigger deactivation and underground teleportation below
+                    self.projectile_age[hit, j] = self.projectile_lifetime_steps
 
         expired = self.projectile_active & (self.projectile_age >= self.projectile_lifetime_steps)
         if expired.any():
@@ -563,6 +587,7 @@ class LeggedRobot(BaseTask):
         self.gravity_vec = to_torch(get_axis_params(-1., self.up_axis_idx), device=self.device).repeat((self.num_envs, 1))
         self.forward_vec = to_torch([1., 0., 0.], device=self.device).repeat((self.num_envs, 1))
         self.torques = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
+        self.hit_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device, requires_grad=False)
         self.p_gains = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.d_gains = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
