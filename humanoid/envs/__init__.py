@@ -39,6 +39,9 @@ from .custom.humanoid_env import XBotLFreeEnv
 from .custom.humanoid_config_jointvel_mask import XBotLCfgJointVelMask, XBotLCfgPPOJointVelMask
 from .custom.humanoid_env_jointvel_mask import XBotLJointVelMaskEnv
 
+from .custom.humanoid_config_radar_mask import XBotLCfgRadarMask, XBotLCfgPPORadarMask
+from .custom.humanoid_env_radar_mask import XBotLRadarMaskEnv
+
 from humanoid.utils.task_registry import task_registry
 
 
@@ -49,4 +52,18 @@ task_registry.register(
     XBotLJointVelMaskEnv,
     XBotLCfgJointVelMask(),
     XBotLCfgPPOJointVelMask()
+)
+
+task_registry.register(
+    "humanoid_ppo_radar_mask",
+    XBotLRadarMaskEnv,
+    XBotLCfgRadarMask(),
+    XBotLCfgPPORadarMask()
+)
+
+task_registry.register(
+    "humanoid_ppo_radar_baseline",
+    XBotLRadarMaskEnv,
+    XBotLCfgRadarMask(),
+    XBotLCfgPPORadarMask()
 )

@@ -39,14 +39,31 @@ class XBotLCfgJointVelMask(LeggedRobotCfg):
         # change the observation dim
         frame_stack = 15
         c_frame_stack = 3
-        num_single_obs = 47
+        # Original 47 + synthetic radar obs 7
+        num_single_obs = 54
         num_observations = int(frame_stack * num_single_obs)
+
+        single_num_privileged_obs = 73
+        num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
+
         single_num_privileged_obs = 73
         num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
         num_actions = 12
         num_envs = 4096
         episode_length_s = 24     # episode length in seconds
         use_ref_actions = False   # speed up training by using reference actions
+    
+    class radar:
+        enabled = True
+
+        # 3 rel pos + 3 rel vel + 1 active flag
+        num_obs = 7
+
+        # optional realism parameters
+        max_range = 10.0       # meters
+        add_noise = True
+        pos_noise = 0.02       # meters
+        vel_noise = 0.05       # m/s
 
     class safety:
         # safety factors

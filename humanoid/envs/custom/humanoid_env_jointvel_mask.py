@@ -239,8 +239,83 @@ class XBotLJointVelMaskEnv(LeggedRobot):
         noise_vec[29: 41] = 0.  # previous actions
         noise_vec[41: 44] = noise_scales.ang_vel * self.obs_scales.ang_vel   # ang vel
         noise_vec[44: 47] = noise_scales.quat * self.obs_scales.quat         # euler x,y
+        # 47:54 synthetic radar obs
+        noise_vec[47:54] = 0.0
         return noise_vec
+    
+    def _get_radar_obs(self):
+        """
+        Synthetic radar-like observation of the closest active projectile.
 
+        Returns shape: [num_envs, 7]
+        Features:
+        0:3  relative projectile position in robot/base frame
+        3:6  relative projectile velocity in robot/base frame
+        6    active flag, 1 if an active projectile is detected else 0
+        """
+        radar_obs = torch.zeros(self.num_envs, 7, device=self.device)
+
+        # If projectiles are disabled, return all zeros.
+        if getattr(self, "projectile_count", 0) == 0:
+            return radar_obs
+
+        # projectile_actor_indices shape: [num_envs, projectile_count]
+        # actor_root_state shape: [num_actors_total, 13]
+        proj_states = self.actor_root_state[self.projectile_actor_indices]  # [N, P, 13]
+
+        proj_pos = proj_states[:, :, 0:3]   # [N, P, 3]
+        proj_vel = proj_states[:, :, 7:10]  # [N, P, 3]
+
+        base_pos = self.root_states[:, 0:3].unsqueeze(1)   # [N, 1, 3]
+        base_vel = self.root_states[:, 7:10].unsqueeze(1)  # [N, 1, 3]
+
+        rel_pos_world = proj_pos - base_pos
+        rel_vel_world = proj_vel - base_vel
+
+        # Only consider active projectiles.
+        active = self.projectile_active  # [N, P]
+
+        # Distance to each projectile.
+        dist = torch.norm(rel_pos_world, dim=-1)  # [N, P]
+
+        # Ignore inactive projectiles by setting huge distance.
+        dist = torch.where(active, dist, torch.full_like(dist, 1e6))
+
+        # Optional radar range cutoff.
+        max_range = getattr(self.cfg.radar, "max_range", 10.0)
+        in_range = dist < max_range
+
+        # Closest active/in-range projectile per env.
+        closest_dist, closest_idx = torch.min(dist, dim=1)  # [N]
+        has_detection = closest_dist < max_range
+
+        env_ids = torch.arange(self.num_envs, device=self.device)
+        closest_rel_pos_world = rel_pos_world[env_ids, closest_idx]  # [N, 3]
+        closest_rel_vel_world = rel_vel_world[env_ids, closest_idx]  # [N, 3]
+
+        # Convert world-frame relative vectors to robot/base frame.
+        rel_pos_body = quat_rotate_inverse(self.base_quat, closest_rel_pos_world)
+        rel_vel_body = quat_rotate_inverse(self.base_quat, closest_rel_vel_world)
+
+        # Zero out envs with no detection.
+        rel_pos_body[~has_detection] = 0.0
+        rel_vel_body[~has_detection] = 0.0
+
+        # Optional noise to make it less oracle-like.
+        if getattr(self.cfg.radar, "add_noise", False):
+            pos_noise = getattr(self.cfg.radar, "pos_noise", 0.02)
+            vel_noise = getattr(self.cfg.radar, "vel_noise", 0.05)
+            rel_pos_body = rel_pos_body + pos_noise * torch.randn_like(rel_pos_body)
+            rel_vel_body = rel_vel_body + vel_noise * torch.randn_like(rel_vel_body)
+
+            rel_pos_body[~has_detection] = 0.0
+            rel_vel_body[~has_detection] = 0.0
+
+        radar_obs[:, 0:3] = rel_pos_body
+        radar_obs[:, 3:6] = rel_vel_body
+        radar_obs[:, 6] = has_detection.float()
+
+        return radar_obs
 
     def step(self, actions):
         if self.cfg.env.use_ref_actions:
@@ -291,13 +366,16 @@ class XBotLJointVelMaskEnv(LeggedRobot):
             contact_mask,  # 2
         ), dim=-1)
 
+        radar_obs = self._get_radar_obs()
+
         obs_buf = torch.cat((
-            self.command_input,  # 5 = 2D(sin cos) + 3D(vel_x, vel_y, aug_vel_yaw)
-            q,    # 12D
-            dq,  # 12D
-            self.actions,   # 12D
+            self.command_input,  # 5
+            q,                   # 12
+            dq,                  # 12
+            self.actions,         # 12
             self.base_ang_vel * self.obs_scales.ang_vel,  # 3
-            self.base_euler_xyz * self.obs_scales.quat,  # 3
+            self.base_euler_xyz * self.obs_scales.quat,   # 3
+            radar_obs,            # 7 synthetic radar features
         ), dim=-1)
 
         if self.cfg.terrain.measure_heights:
