@@ -10,7 +10,7 @@
 # this list of conditions and the following disclaimer in the documentation
 # and/or other materials provided with the distribution.
 #
-# 3. Neither the name of the copyright holder nor the names of its
+# 3. Neither the name of the copyright holder nor the names of itsc
 # contributors may be used to endorse or promote products derived from
 # this software without specific prior written permission.
 #
@@ -34,7 +34,7 @@ from isaacgym.torch_utils import *
 from isaacgym import gymtorch, gymapi
 
 import torch
-from humanoid.envs import LeggedRobot
+from humanoid.envs.base.legged_robot import LeggedRobot
 
 from humanoid.utils.terrain import  HumanoidTerrain
 
@@ -97,6 +97,31 @@ class XBotLRadarMaskEnv(LeggedRobot):
         self.reset_idx(torch.tensor(range(self.num_envs), device=self.device))
         self.compute_observations()
 
+    def _apply_radar_mask(self, radar_obs):
+        """
+        Randomly zeroes radar observations for fixed-duration dropout events.
+        """
+        if not getattr(self.cfg.radar_mask, "enabled", False):
+            return radar_obs
+
+        self.radar_mask_timer = torch.clamp(
+            self.radar_mask_timer - 1,
+            min=0
+        )
+
+        inactive = self.radar_mask_timer == 0
+
+        start_mask = (
+            torch.rand(self.num_envs, device=self.device) < self.cfg.radar_mask.prob
+        ) & inactive
+
+        self.radar_mask_timer[start_mask] = self.cfg.radar_mask.duration_steps
+
+        active_mask = self.radar_mask_timer > 0
+        radar_obs[active_mask, :] = 0.0
+
+        return radar_obs
+
     def _apply_joint_vel_mask(self, dq):
         """
         Randomly masks one joint velocity per environment for a fixed duration.
@@ -119,12 +144,17 @@ class XBotLRadarMaskEnv(LeggedRobot):
         ) & inactive
 
         # Choose one random joint velocity index for each newly masked env.
-        self.joint_vel_mask_idx[start_new_mask] = torch.randint(
-            low=0,
-            high=dq.shape[1],
-            size=(start_new_mask.sum(),),
-            device=self.device
-        )
+        num_new = int(start_new_mask.sum().item())
+
+        if num_new > 0:
+            self.joint_vel_mask_idx[start_new_mask] = torch.randint(
+                low=0,
+                high=dq.shape[1],
+                size=(num_new,),
+                device=self.device
+            )
+
+            self.joint_vel_mask_timer[start_new_mask] = self.cfg.joint_vel_mask.duration_steps
 
         # Set duration for newly started masks.
         self.joint_vel_mask_timer[start_new_mask] = self.cfg.joint_vel_mask.duration_steps

@@ -45,9 +45,6 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
 
         single_num_privileged_obs = 73
         num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
-
-        single_num_privileged_obs = 73
-        num_privileged_obs = int(c_frame_stack * single_num_privileged_obs)
         num_actions = 12
         num_envs = 4096
         episode_length_s = 24     # episode length in seconds
@@ -268,7 +265,7 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         duration_steps = 50
 
 
-class XBotLCfgPPOJointVelMask(LeggedRobotCfgPPO):
+class XBotLCfgPPORadarMask(LeggedRobotCfgPPO):
     seed = 5
     runner_class_name = 'OnPolicyRunner'   # DWLOnPolicyRunner
 
