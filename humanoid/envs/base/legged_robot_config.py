@@ -40,6 +40,11 @@ class LeggedRobotCfg(BaseConfig):
         env_spacing = 3.  # not used with heightfields/trimeshes 
         send_timeouts = True # send time out information to the algorithm
         episode_length_s = 20 # episode length in seconds
+        terminate_on_contacts = False
+        termination_height = 0.45
+        termination_roll = 1.2
+        termination_pitch = 1.2
+        termination_grace_steps = 8
 
     class terrain:
         mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
@@ -117,6 +122,15 @@ class LeggedRobotCfg(BaseConfig):
         max_linear_velocity = 1000.
         armature = 0.
         thickness = 0.01
+
+    class projectile:
+        file = "{LEGGED_GYM_ROOT_DIR}/resources/projectiles/sphere/sphere.urdf"
+        radius = 0.05
+        mass = 1.5
+        count = 4
+        spawn_rate_s = 1.0
+        speed = 15.0
+        lifetime_s = 2.0
 
 
     class domain_rand:

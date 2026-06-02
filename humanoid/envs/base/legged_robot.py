@@ -125,6 +125,8 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_net_contact_force_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
+        self.root_states[:] = self.actor_root_state[self.robot_actor_indices]
+
         self.episode_length_buf += 1
         self.common_step_counter += 1
 
@@ -156,7 +158,23 @@ class LeggedRobot(BaseTask):
     def check_termination(self):
         """ Check if environments need to be reset
         """
-        self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
+        fall_height = self.root_states[:, 2] < self.cfg.env.termination_height
+        roll = torch.abs(self.base_euler_xyz[:, 0]) > self.cfg.env.termination_roll
+        pitch = torch.abs(self.base_euler_xyz[:, 1]) > self.cfg.env.termination_pitch
+        fall_condition = fall_height | roll | pitch
+
+        self.fall_counter = torch.where(
+            fall_condition,
+            self.fall_counter + 1,
+            torch.zeros_like(self.fall_counter))
+
+        self.reset_buf = self.fall_counter >= self.cfg.env.termination_grace_steps
+
+        if self.cfg.env.terminate_on_contacts and self.termination_contact_indices.numel() > 0:
+            contact_reset = torch.any(
+                torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
+            self.reset_buf |= contact_reset
+
         self.time_out_buf = self.episode_length_buf > self.max_episode_length # no terminal reward for time-outs
         self.reset_buf |= self.time_out_buf
 
@@ -195,6 +213,7 @@ class LeggedRobot(BaseTask):
         self.feet_air_time[env_ids] = 0.
         self.episode_length_buf[env_ids] = 0
         self.reset_buf[env_ids] = 1
+        self.fall_counter[env_ids] = 0
         # fill extras
         self.extras["episode"] = {}
         for key in self.episode_sums.keys():
@@ -319,6 +338,63 @@ class LeggedRobot(BaseTask):
         if self.cfg.domain_rand.push_robots and  (self.common_step_counter % self.cfg.domain_rand.push_interval == 0):
             self._push_robots()
 
+        if getattr(self, "projectile_count", 0) > 0:
+            self._update_projectiles()
+
+    def _update_projectiles(self):
+        if self.projectile_count == 0:
+            return
+
+        if self.projectile_active.any():
+            self.projectile_age[self.projectile_active] += 1
+
+        expired = self.projectile_active & (self.projectile_age >= self.projectile_lifetime_steps)
+        if expired.any():
+            expired_indices = self.projectile_actor_indices[expired]
+            self.actor_root_state[expired_indices, 2] = -10.0
+            self.actor_root_state[expired_indices, 7:13] = 0.0
+            self.projectile_active[expired] = False
+            self.projectile_age[expired] = 0
+            expired_indices_int32 = expired_indices.to(dtype=torch.int32)
+            self.gym.set_actor_root_state_tensor_indexed(
+                self.sim,
+                gymtorch.unwrap_tensor(self.actor_root_state),
+                gymtorch.unwrap_tensor(expired_indices_int32),
+                len(expired_indices_int32))
+
+        if self.common_step_counter % self.projectile_spawn_interval != 0:
+            return
+
+        env_ids = torch.arange(self.num_envs, device=self.device)
+        slot = self.projectile_next_index
+        actor_indices = self.projectile_actor_indices[env_ids, slot]
+
+        base_pos = self.root_states[:, :3]
+        forward = quat_apply(self.base_quat, self.forward_vec)
+        lateral = torch_rand_float(-self.projectile_lateral_range, self.projectile_lateral_range, (self.num_envs, 1), device=self.device)
+
+        spawn_pos = base_pos + forward * self.projectile_spawn_distance
+        spawn_pos[:, 2] += self.projectile_spawn_height
+        spawn_pos[:, 1] += lateral.squeeze(1)
+
+        velocity = -forward * self.projectile_speed
+
+        self.actor_root_state[actor_indices, 0:3] = spawn_pos
+        self.actor_root_state[actor_indices, 3:7] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+        self.actor_root_state[actor_indices, 7:10] = velocity
+        self.actor_root_state[actor_indices, 10:13] = 0.0
+
+        self.projectile_active[env_ids, slot] = True
+        self.projectile_age[env_ids, slot] = 0
+        self.projectile_next_index = (slot + 1) % self.projectile_count
+
+        actor_indices_int32 = actor_indices.to(dtype=torch.int32)
+        self.gym.set_actor_root_state_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self.actor_root_state),
+            gymtorch.unwrap_tensor(actor_indices_int32),
+            len(actor_indices_int32))
+
     def _resample_commands(self, env_ids):
         """ Randommly select commands of some environments
 
@@ -391,10 +467,13 @@ class LeggedRobot(BaseTask):
         if self.cfg.asset.fix_base_link:
             self.root_states[env_ids, 7:13] = 0
             self.root_states[env_ids, 2] += 1.8
-        env_ids_int32 = env_ids.to(dtype=torch.int32)
-        self.gym.set_actor_root_state_tensor_indexed(self.sim,
-                                                     gymtorch.unwrap_tensor(self.root_states),
-                                                     gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
+        actor_ids = self.robot_actor_indices[env_ids]
+        self.actor_root_state[actor_ids] = self.root_states[env_ids]
+        actor_ids_int32 = actor_ids.to(dtype=torch.int32)
+        self.gym.set_actor_root_state_tensor_indexed(
+            self.sim,
+            gymtorch.unwrap_tensor(self.actor_root_state),
+            gymtorch.unwrap_tensor(actor_ids_int32), len(actor_ids_int32))
 
 
     def _update_terrain_curriculum(self, env_ids):
@@ -446,10 +525,12 @@ class LeggedRobot(BaseTask):
         self.gym.refresh_rigid_body_state_tensor(self.sim)
 
         # create some wrapper tensors for different slices
-        self.root_states = gymtorch.wrap_tensor(actor_root_state)
+        self.actor_root_state = gymtorch.wrap_tensor(actor_root_state)
         self.dof_state = gymtorch.wrap_tensor(dof_state_tensor)
         self.dof_pos = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 0]
         self.dof_vel = self.dof_state.view(self.num_envs, self.num_dof, 2)[..., 1]
+        self.root_states = torch.zeros(self.num_envs, 13, dtype=self.actor_root_state.dtype, device=self.device)
+        self.root_states[:] = self.actor_root_state[self.robot_actor_indices]
         self.base_quat = self.root_states[:, 3:7]
         self.base_euler_xyz = get_euler_xyz_tensor(self.base_quat)
 
@@ -475,12 +556,24 @@ class LeggedRobot(BaseTask):
         self.commands_scale = torch.tensor([self.obs_scales.lin_vel, self.obs_scales.lin_vel, self.obs_scales.ang_vel], device=self.device, requires_grad=False,) # TODO change this
         self.feet_air_time = torch.zeros(self.num_envs, self.feet_indices.shape[0], dtype=torch.float, device=self.device, requires_grad=False)
         self.last_contacts = torch.zeros(self.num_envs, len(self.feet_indices), dtype=torch.bool, device=self.device, requires_grad=False)
+        self.fall_counter = torch.zeros(self.num_envs, dtype=torch.long, device=self.device, requires_grad=False)
         self.base_lin_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 7:10])
         self.base_ang_vel = quat_rotate_inverse(self.base_quat, self.root_states[:, 10:13])
         self.projected_gravity = quat_rotate_inverse(self.base_quat, self.gravity_vec)
         if self.cfg.terrain.measure_heights:
             self.height_points = self._init_height_points()
         self.measured_heights = 0
+
+        if getattr(self, "projectile_count", 0) > 0:
+            self.projectile_spawn_interval = max(1, int(self.cfg.projectile.spawn_rate_s / self.dt))
+            self.projectile_lifetime_steps = max(1, int(self.cfg.projectile.lifetime_s / self.dt))
+            self.projectile_speed = float(self.cfg.projectile.speed)
+            self.projectile_active = torch.zeros(self.num_envs, self.projectile_count, dtype=torch.bool, device=self.device)
+            self.projectile_age = torch.zeros(self.num_envs, self.projectile_count, dtype=torch.long, device=self.device)
+            self.projectile_next_index = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+            self.projectile_spawn_height = 0.6
+            self.projectile_spawn_distance = 2.0
+            self.projectile_lateral_range = 0.5
 
         # joint positions offsets and PD gains
         self.default_dof_pos = torch.zeros(self.num_dof, dtype=torch.float, device=self.device, requires_grad=False)
@@ -614,6 +707,17 @@ class LeggedRobot(BaseTask):
         asset_options.disable_gravity = self.cfg.asset.disable_gravity
 
         robot_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+
+        self.projectile_count = int(self.cfg.projectile.count) if hasattr(self.cfg, "projectile") else 0
+        projectile_asset = None
+        if self.projectile_count > 0:
+            projectile_path = self.cfg.projectile.file.format(LEGGED_GYM_ROOT_DIR=LEGGED_GYM_ROOT_DIR)
+            projectile_root = os.path.dirname(projectile_path)
+            projectile_file = os.path.basename(projectile_path)
+            projectile_options = gymapi.AssetOptions()
+            projectile_options.disable_gravity = False
+            projectile_options.fix_base_link = False
+            projectile_asset = self.gym.load_asset(self.sim, projectile_root, projectile_file, projectile_options)
         self.num_dof = self.gym.get_asset_dof_count(robot_asset)
         self.num_bodies = self.gym.get_asset_rigid_body_count(robot_asset)
         dof_props_asset = self.gym.get_asset_dof_properties(robot_asset)
@@ -646,6 +750,10 @@ class LeggedRobot(BaseTask):
         self.env_frictions = torch.zeros(self.num_envs, 1, dtype=torch.float32, device=self.device)
 
         self.body_mass = torch.zeros(self.num_envs, 1, dtype=torch.float32, device=self.device, requires_grad=False)
+        self.robot_actor_indices = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        if self.projectile_count > 0:
+            self.projectile_actor_indices = torch.zeros(self.num_envs, self.projectile_count, dtype=torch.long, device=self.device)
+            self.projectile_handles = []
         
         for i in range(self.num_envs):
             # create env instance
@@ -657,6 +765,8 @@ class LeggedRobot(BaseTask):
             rigid_shape_props = self._process_rigid_shape_props(rigid_shape_props_asset, i)
             self.gym.set_asset_rigid_shape_properties(robot_asset, rigid_shape_props)
             actor_handle = self.gym.create_actor(env_handle, robot_asset, start_pose, self.cfg.asset.name, i, self.cfg.asset.self_collisions, 0)
+            robot_actor_index = self.gym.get_actor_index(env_handle, actor_handle, gymapi.IndexDomain.DOMAIN_SIM)
+            self.robot_actor_indices[i] = robot_actor_index
             dof_props = self._process_dof_props(dof_props_asset, i)
             self.gym.set_actor_dof_properties(env_handle, actor_handle, dof_props)
             body_props = self.gym.get_actor_rigid_body_properties(env_handle, actor_handle)
@@ -664,6 +774,26 @@ class LeggedRobot(BaseTask):
             self.gym.set_actor_rigid_body_properties(env_handle, actor_handle, body_props, recomputeInertia=True)
             self.envs.append(env_handle)
             self.actor_handles.append(actor_handle)
+
+            if projectile_asset is not None:
+                env_projectile_handles = []
+                for j in range(self.projectile_count):
+                    projectile_pose = gymapi.Transform()
+                    projectile_pose.p = gymapi.Vec3(pos[0].item(), pos[1].item(), -10.0)
+                    projectile_handle = self.gym.create_actor(
+                        env_handle, projectile_asset, projectile_pose, "projectile", i, 0, 0)
+                    projectile_props = self.gym.get_actor_rigid_body_properties(env_handle, projectile_handle)
+                    if len(projectile_props) > 0:
+                        projectile_props[0].mass = self.cfg.projectile.mass
+                        self.gym.set_actor_rigid_body_properties(
+                            env_handle, projectile_handle, projectile_props, recomputeInertia=True)
+                    self.gym.set_rigid_body_color(
+                        env_handle, projectile_handle, 0, gymapi.MESH_VISUAL_AND_COLLISION, gymapi.Vec3(0.8, 0.1, 0.1))
+                    projectile_actor_index = self.gym.get_actor_index(
+                        env_handle, projectile_handle, gymapi.IndexDomain.DOMAIN_SIM)
+                    self.projectile_actor_indices[i, j] = projectile_actor_index
+                    env_projectile_handles.append(projectile_handle)
+                self.projectile_handles.append(env_projectile_handles)
 
         self.feet_indices = torch.zeros(len(feet_names), dtype=torch.long, device=self.device, requires_grad=False)
         for i in range(len(feet_names)):

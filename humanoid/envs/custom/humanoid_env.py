@@ -94,8 +94,9 @@ class XBotLFreeEnv(LeggedRobot):
 
         self.root_states[:, 10:13] = self.rand_push_torque
 
+        self.actor_root_state[self.robot_actor_indices] = self.root_states
         self.gym.set_actor_root_state_tensor(
-            self.sim, gymtorch.unwrap_tensor(self.root_states))
+            self.sim, gymtorch.unwrap_tensor(self.actor_root_state))
 
     def  _get_phase(self):
         cycle_time = self.cfg.rewards.cycle_time

@@ -159,6 +159,12 @@ class XBotLCfg(LeggedRobotCfg):
         action_delay = 0.5
         action_noise = 0.02
 
+    class projectile(LeggedRobotCfg.projectile):
+        count = 6
+        spawn_rate_s = 0.8
+        speed = 7.5
+        lifetime_s = 2.5
+
     class commands(LeggedRobotCfg.commands):
         # Vers: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
         num_commands = 4
