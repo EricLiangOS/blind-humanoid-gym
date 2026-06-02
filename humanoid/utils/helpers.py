@@ -144,6 +144,31 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
         # num envs
         if args.num_envs is not None:
             env_cfg.env.num_envs = args.num_envs
+
+        if getattr(args, "projectiles", None) is not None:
+            val = args.projectiles.lower() in ["true", "1", "yes"]
+            if hasattr(env_cfg, "projectile"):
+                env_cfg.projectile.count = 6 if val else 0
+
+        if getattr(args, "impact_failures", None) is not None:
+            val = args.impact_failures.lower() in ["true", "1", "yes"]
+            env_cfg.impact_failures = val
+
+        if getattr(args, "blink_sensors", None) is not None:
+            val = args.blink_sensors.lower() in ["true", "1", "yes"]
+            if hasattr(env_cfg, "joint_vel_mask"):
+                env_cfg.joint_vel_mask.enabled = val
+
+        if getattr(args, "blink_actuators", None) is not None:
+            val = args.blink_actuators.lower() in ["true", "1", "yes"]
+            if hasattr(env_cfg, "joint_actuator_limp"):
+                env_cfg.joint_actuator_limp.enabled = val
+
+        if getattr(args, "blink_radar", None) is not None:
+            val = args.blink_radar.lower() in ["true", "1", "yes"]
+            if hasattr(env_cfg, "radar_mask"):
+                env_cfg.radar_mask.enabled = val
+
     if cfg_train is not None:
         if args.seed is not None:
             cfg_train.seed = args.seed
@@ -230,6 +255,31 @@ def get_args():
             "name": "--max_iterations",
             "type": int,
             "help": "Maximum number of training iterations. Overrides config file if provided.",
+        },
+        {
+            "name": "--projectiles",
+            "type": str,
+            "help": "Enable or disable projectiles (True/False)",
+        },
+        {
+            "name": "--impact_failures",
+            "type": str,
+            "help": "Enable or disable impact failures (True/False)",
+        },
+        {
+            "name": "--blink_sensors",
+            "type": str,
+            "help": "Enable or disable joint velocity sensor blinking (True/False)",
+        },
+        {
+            "name": "--blink_actuators",
+            "type": str,
+            "help": "Enable or disable joint actuator limp blinking (True/False)",
+        },
+        {
+            "name": "--blink_radar",
+            "type": str,
+            "help": "Enable or disable radar sensor blinking (True/False)",
         },
     ]
     # parse arguments

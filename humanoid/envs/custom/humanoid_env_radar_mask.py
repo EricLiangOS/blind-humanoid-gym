@@ -92,6 +92,16 @@ class XBotLRadarMaskEnv(LeggedRobot):
             self.num_envs, device=self.device, dtype=torch.long
         )
 
+        # One timer per environment for joint actuator limpness (floppy joints).
+        self.joint_limp_timer = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long
+        )
+
+        # Which joint actuator is currently limp/disabled for each env.
+        self.joint_limp_idx = torch.zeros(
+            self.num_envs, device=self.device, dtype=torch.long
+        )
+
         # Identify rigid body indices for impact-triggered failures
         body_names = self.gym.get_actor_rigid_body_names(self.envs[0], self.actor_handles[0])
         self.left_leg_upper_bodies = []
@@ -189,6 +199,39 @@ class XBotLRadarMaskEnv(LeggedRobot):
 
         return dq
 
+    def _apply_joint_limp_mask(self):
+        """
+        Randomly sets one joint actuator to limp per environment for a fixed duration.
+        """
+        if not getattr(self.cfg.joint_actuator_limp, "enabled", False):
+            return
+
+        # Decrement existing timers.
+        self.joint_limp_timer = torch.clamp(
+            self.joint_limp_timer - 1,
+            min=0
+        )
+
+        # Only start a new limp state for envs that are currently not limp.
+        inactive = self.joint_limp_timer == 0
+
+        start_new_limp = (
+            torch.rand(self.num_envs, device=self.device) < self.cfg.joint_actuator_limp.prob
+        ) & inactive
+
+        # Choose one random joint index for each newly limp env.
+        num_new = int(start_new_limp.sum().item())
+
+        if num_new > 0:
+            self.joint_limp_idx[start_new_limp] = torch.randint(
+                low=0,
+                high=self.num_actions,
+                size=(num_new,),
+                device=self.device
+            )
+
+            self.joint_limp_timer[start_new_limp] = self.cfg.joint_actuator_limp.duration_steps
+
     def _check_impact_failures(self):
         """
         Detects projectile impacts on different body parts and triggers corresponding failures.
@@ -201,25 +244,41 @@ class XBotLRadarMaskEnv(LeggedRobot):
         if len(self.left_leg_upper_bodies) > 0:
             left_forces = torch.norm(self.contact_forces[:, self.left_leg_upper_bodies, :], dim=-1) # [N, num_left_bodies]
             left_hit = torch.any(left_forces > 10.0, dim=1) # [N]
-            # Trigger joint sensor mask on a random joint of the left leg (indices 0..5)
+            # Trigger joint sensor mask and joint limpness on a random joint of the left leg (indices 0..5)
             if left_hit.any():
                 envs_to_trigger = left_hit.nonzero(as_tuple=False).flatten()
                 # Select random joint index from 0 to 5
                 rand_joint = torch.randint(0, 6, (len(envs_to_trigger),), device=self.device)
-                self.joint_vel_mask_timer[envs_to_trigger] = self.cfg.joint_vel_mask.duration_steps
-                self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
+                
+                if getattr(self.cfg.joint_vel_mask, "enabled", False) or getattr(self.cfg, "impact_failures", False):
+                    duration = getattr(self.cfg.joint_vel_mask, "duration_steps", 50)
+                    self.joint_vel_mask_timer[envs_to_trigger] = duration
+                    self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
+                
+                if getattr(self.cfg.joint_actuator_limp, "enabled", False) or getattr(self.cfg, "impact_failures", False):
+                    duration = getattr(self.cfg.joint_actuator_limp, "duration_steps", 50)
+                    self.joint_limp_timer[envs_to_trigger] = duration
+                    self.joint_limp_idx[envs_to_trigger] = rand_joint
 
         # Check right leg impacts (exclude feet)
         if len(self.right_leg_upper_bodies) > 0:
             right_forces = torch.norm(self.contact_forces[:, self.right_leg_upper_bodies, :], dim=-1)
             right_hit = torch.any(right_forces > 10.0, dim=1)
-            # Trigger joint sensor mask on a random joint of the right leg (indices 6..11)
+            # Trigger joint sensor mask and joint limpness on a random joint of the right leg (indices 6..11)
             if right_hit.any():
                 envs_to_trigger = right_hit.nonzero(as_tuple=False).flatten()
                 # Select random joint index from 6 to 11
                 rand_joint = torch.randint(6, 12, (len(envs_to_trigger),), device=self.device)
-                self.joint_vel_mask_timer[envs_to_trigger] = self.cfg.joint_vel_mask.duration_steps
-                self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
+                
+                if getattr(self.cfg.joint_vel_mask, "enabled", False) or getattr(self.cfg, "impact_failures", False):
+                    duration = getattr(self.cfg.joint_vel_mask, "duration_steps", 50)
+                    self.joint_vel_mask_timer[envs_to_trigger] = duration
+                    self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
+                
+                if getattr(self.cfg.joint_actuator_limp, "enabled", False) or getattr(self.cfg, "impact_failures", False):
+                    duration = getattr(self.cfg.joint_actuator_limp, "duration_steps", 50)
+                    self.joint_limp_timer[envs_to_trigger] = duration
+                    self.joint_limp_idx[envs_to_trigger] = rand_joint
 
         # Check base link / camera impacts
         if len(self.base_bodies) > 0:
@@ -228,7 +287,9 @@ class XBotLRadarMaskEnv(LeggedRobot):
             # Trigger radar/camera mask
             if base_hit.any():
                 envs_to_trigger = base_hit.nonzero(as_tuple=False).flatten()
-                self.radar_mask_timer[envs_to_trigger] = self.cfg.radar_mask.duration_steps
+                if getattr(self.cfg.radar_mask, "enabled", False) or getattr(self.cfg, "impact_failures", False):
+                    duration = getattr(self.cfg.radar_mask, "duration_steps", 50)
+                    self.radar_mask_timer[envs_to_trigger] = duration
 
     def _push_robots(self):
         """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity. 
@@ -413,6 +474,7 @@ class XBotLRadarMaskEnv(LeggedRobot):
         return radar_obs
 
     def step(self, actions):
+        self._apply_joint_limp_mask()
         if self.cfg.env.use_ref_actions:
             actions += self.ref_action
         actions = torch.clip(actions, -self.cfg.normalization.clip_actions, self.cfg.normalization.clip_actions)
@@ -500,6 +562,9 @@ class XBotLRadarMaskEnv(LeggedRobot):
 
         self.joint_vel_mask_timer[env_ids] = 0
         self.joint_vel_mask_idx[env_ids] = 0
+
+        self.joint_limp_timer[env_ids] = 0
+        self.joint_limp_idx[env_ids] = 0
 
         for i in range(self.obs_history.maxlen):
             self.obs_history[i][env_ids] *= 0

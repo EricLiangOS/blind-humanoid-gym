@@ -266,6 +266,15 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         # duration in policy steps, not physics substeps
         duration_steps = 50
 
+    class joint_actuator_limp:
+        enabled = False
+
+        # probability per env per policy step of starting a new limp state
+        prob = 0.001
+
+        # duration in policy steps, not physics substeps
+        duration_steps = 50
+
 
 class XBotLCfgPPORadarMask(LeggedRobotCfgPPO):
     seed = 5
