@@ -30,6 +30,8 @@
 # Copyright (c) 2024 Beijing RobotEra TECHNOLOGY CO.,LTD. All rights reserved.
 
 
+from isaacgym import gymapi  # must import before torch
+
 from humanoid.envs import *
 from humanoid.utils import get_args, task_registry
 

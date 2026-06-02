@@ -126,10 +126,10 @@ class LeggedRobotCfg(BaseConfig):
     class projectile:
         file = "{LEGGED_GYM_ROOT_DIR}/resources/projectiles/sphere/sphere.urdf"
         radius = 0.05
-        mass = 1.5
+        mass = 3
         count = 4
         spawn_rate_s = 1.0
-        speed = 15.0
+        speed = 25.0
         lifetime_s = 2.0
 
 
