@@ -370,14 +370,33 @@ class LeggedRobot(BaseTask):
         actor_indices = self.projectile_actor_indices[env_ids, slot]
 
         base_pos = self.root_states[:, :3]
-        forward = quat_apply(self.base_quat, self.forward_vec)
-        lateral = torch_rand_float(-self.projectile_lateral_range, self.projectile_lateral_range, (self.num_envs, 1), device=self.device)
 
-        spawn_pos = base_pos + forward * self.projectile_spawn_distance
-        spawn_pos[:, 2] += self.projectile_spawn_height
-        spawn_pos[:, 1] += lateral.squeeze(1)
+        # Sample random horizontal angle theta in [0, 2pi]
+        theta = torch_rand_float(0, 2 * np.pi, (self.num_envs, 1), device=self.device).squeeze(1)
 
-        velocity = -forward * self.projectile_speed
+        # Compute spawn position on a circle of radius spawn_distance centered around the robot
+        spawn_pos = torch.zeros((self.num_envs, 3), device=self.device)
+        spawn_pos[:, 0] = base_pos[:, 0] + self.projectile_spawn_distance * torch.cos(theta)
+        spawn_pos[:, 1] = base_pos[:, 1] + self.projectile_spawn_distance * torch.sin(theta)
+
+        # Randomize spawn height relative to the base height (clamped to stay above ground)
+        height_offset = torch_rand_float(-0.3, 0.6, (self.num_envs, 1), device=self.device).squeeze(1)
+        spawn_pos[:, 2] = torch.clamp(base_pos[:, 2] + height_offset, min=0.1)
+
+        # Compute target position (CoM with randomized scatter perturbation)
+        target_pos = base_pos.clone()
+        # Add random scatter to target to hit various limbs/base
+        scatter_x = torch_rand_float(-0.3, 0.3, (self.num_envs, 1), device=self.device).squeeze(1)
+        scatter_y = torch_rand_float(-0.3, 0.3, (self.num_envs, 1), device=self.device).squeeze(1)
+        scatter_z = torch_rand_float(-0.3, 0.3, (self.num_envs, 1), device=self.device).squeeze(1)
+        target_pos[:, 0] += scatter_x
+        target_pos[:, 1] += scatter_y
+        target_pos[:, 2] = torch.clamp(target_pos[:, 2] + scatter_z, min=0.1)
+
+        # 4. Aim velocity directly at target position
+        direction = target_pos - spawn_pos
+        direction = direction / torch.norm(direction, dim=-1, keepdim=True)
+        velocity = direction * self.projectile_speed
 
         self.actor_root_state[actor_indices, 0:3] = spawn_pos
         self.actor_root_state[actor_indices, 3:7] = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
