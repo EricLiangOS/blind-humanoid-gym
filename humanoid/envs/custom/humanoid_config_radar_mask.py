@@ -35,6 +35,8 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
     """
     Configuration class for the XBotL humanoid robot.
     """
+    impact_failures = False
+
     class env(LeggedRobotCfg.env):
         # change the observation dim
         frame_stack = 15

@@ -92,6 +92,27 @@ class XBotLRadarMaskEnv(LeggedRobot):
             self.num_envs, device=self.device, dtype=torch.long
         )
 
+        # Identify rigid body indices for impact-triggered failures
+        body_names = self.gym.get_actor_rigid_body_names(self.envs[0], self.actor_handles[0])
+        self.left_leg_upper_bodies = []
+        self.right_leg_upper_bodies = []
+        self.base_bodies = []
+        
+        for idx, name in enumerate(body_names):
+            if "left" in name:
+                # Exclude feet and ankle links that touch the ground
+                if not any(exclude in name for exclude in ["foot", "sole", "ankle"]):
+                    self.left_leg_upper_bodies.append(idx)
+            elif "right" in name:
+                if not any(exclude in name for exclude in ["foot", "sole", "ankle"]):
+                    self.right_leg_upper_bodies.append(idx)
+            elif "base_link" in name:
+                self.base_bodies.append(idx)
+                
+        self.left_leg_upper_bodies = torch.tensor(self.left_leg_upper_bodies, device=self.device, dtype=torch.long)
+        self.right_leg_upper_bodies = torch.tensor(self.right_leg_upper_bodies, device=self.device, dtype=torch.long)
+        self.base_bodies = torch.tensor(self.base_bodies, device=self.device, dtype=torch.long)
+
         self.last_feet_z = 0.05
         self.feet_height = torch.zeros((self.num_envs, 2), device=self.device)
         self.reset_idx(torch.tensor(range(self.num_envs), device=self.device))
@@ -167,6 +188,47 @@ class XBotLRadarMaskEnv(LeggedRobot):
             dq[env_ids, joint_ids] = 0.0
 
         return dq
+
+    def _check_impact_failures(self):
+        """
+        Detects projectile impacts on different body parts and triggers corresponding failures.
+        """
+        # Only run if impact failures are enabled (via config or command line)
+        if not getattr(self.cfg, "impact_failures", False):
+            return
+
+        # Check left leg impacts (exclude feet)
+        if len(self.left_leg_upper_bodies) > 0:
+            left_forces = torch.norm(self.contact_forces[:, self.left_leg_upper_bodies, :], dim=-1) # [N, num_left_bodies]
+            left_hit = torch.any(left_forces > 10.0, dim=1) # [N]
+            # Trigger joint sensor mask on a random joint of the left leg (indices 0..5)
+            if left_hit.any():
+                envs_to_trigger = left_hit.nonzero(as_tuple=False).flatten()
+                # Select random joint index from 0 to 5
+                rand_joint = torch.randint(0, 6, (len(envs_to_trigger),), device=self.device)
+                self.joint_vel_mask_timer[envs_to_trigger] = self.cfg.joint_vel_mask.duration_steps
+                self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
+
+        # Check right leg impacts (exclude feet)
+        if len(self.right_leg_upper_bodies) > 0:
+            right_forces = torch.norm(self.contact_forces[:, self.right_leg_upper_bodies, :], dim=-1)
+            right_hit = torch.any(right_forces > 10.0, dim=1)
+            # Trigger joint sensor mask on a random joint of the right leg (indices 6..11)
+            if right_hit.any():
+                envs_to_trigger = right_hit.nonzero(as_tuple=False).flatten()
+                # Select random joint index from 6 to 11
+                rand_joint = torch.randint(6, 12, (len(envs_to_trigger),), device=self.device)
+                self.joint_vel_mask_timer[envs_to_trigger] = self.cfg.joint_vel_mask.duration_steps
+                self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
+
+        # Check base link / camera impacts
+        if len(self.base_bodies) > 0:
+            base_forces = torch.norm(self.contact_forces[:, self.base_bodies, :], dim=-1)
+            base_hit = torch.any(base_forces > 10.0, dim=1)
+            # Trigger radar/camera mask
+            if base_hit.any():
+                envs_to_trigger = base_hit.nonzero(as_tuple=False).flatten()
+                self.radar_mask_timer[envs_to_trigger] = self.cfg.radar_mask.duration_steps
 
     def _push_robots(self):
         """ Random pushes the robots. Emulates an impulse by setting a randomized base velocity. 
@@ -362,6 +424,7 @@ class XBotLRadarMaskEnv(LeggedRobot):
 
 
     def compute_observations(self):
+        self._check_impact_failures()
 
         phase = self._get_phase()
         self.compute_ref_state()
