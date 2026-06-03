@@ -426,6 +426,13 @@ def evaluate(args):
         active_action_smoothness_sum += action_diff
         active_action_energy += torch.sum(actions ** 2, dim=1)
 
+        # Mechanical energy from torque * joint velocity, if available.
+        # This is computed before step_result = env.step(actions) because env.step() resets done envs,
+        # which would corrupt the final step's mechanical energy calculations.
+        if hasattr(env, "torques") and hasattr(env, "dof_vel"):
+            power = torch.sum(torch.abs(env.torques * env.dof_vel), dim=1)
+            active_mechanical_energy += power * policy_dt
+
         prev_actions = actions.clone()
 
         # Step environment.
@@ -440,11 +447,6 @@ def evaluate(args):
 
         active_reward_sum += rewards
         active_steps += 1
-
-        # Mechanical energy from torque * joint velocity, if available.
-        if hasattr(env, "torques") and hasattr(env, "dof_vel"):
-            power = torch.sum(torch.abs(env.torques * env.dof_vel), dim=1)
-            active_mechanical_energy += power * policy_dt
 
         # Limp recovery tracking.
         if args.enable_limp_test:
