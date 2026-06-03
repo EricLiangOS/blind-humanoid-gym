@@ -135,7 +135,11 @@ class TaskRegistry():
         # override cfg from args (if specified)
         _, train_cfg = update_cfg_from_args(None, train_cfg, args)
         if getattr(args, "schedule", None) is None:
-            train_cfg.algorithm.schedule = 'fixed' if train_cfg.runner.resume else 'adaptive'
+            if train_cfg.runner.resume:
+                train_cfg.algorithm.schedule = 'fixed'
+                train_cfg.algorithm.learning_rate = 5e-5
+            else:
+                train_cfg.algorithm.schedule = 'adaptive'
 
         if log_root=="default":
             log_root = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name)
@@ -164,7 +168,7 @@ class TaskRegistry():
             
             # Defaults
             load_opt = is_same_phase
-            reset_std_val = -1.0 if is_same_phase else 0.6
+            reset_std_val = -1.0 if is_same_phase else 0.3
             
             # CLI overrides
             if getattr(args, "load_optimizer", False):
