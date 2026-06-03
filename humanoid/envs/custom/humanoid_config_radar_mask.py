@@ -70,13 +70,13 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         vel_noise = 0.05       # m/s
 
     class radar_mask:
-        enabled = False # True
+        enabled = False
 
         # probability per env per policy step of losing radar
-        prob = 0 #0.001
+        prob = 0.01
 
         # duration in policy steps
-        duration_steps = 0 #50
+        duration_steps = 50
 
     class safety:
         # safety factors
@@ -266,7 +266,7 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         enabled = False
 
         # probability per env per policy step of starting a new mask
-        prob = 0.001
+        prob = 0.01
 
         # duration in policy steps, not physics substeps
         duration_steps = 50
@@ -275,10 +275,10 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         enabled = False
 
         # probability per env per policy step of starting a new limp state
-        prob = 0.001
+        prob = 0.002
 
         # duration in policy steps, not physics substeps
-        duration_steps = 50
+        duration_steps = 30
 
 
 class XBotLCfgPPORadarMask(LeggedRobotCfgPPO):

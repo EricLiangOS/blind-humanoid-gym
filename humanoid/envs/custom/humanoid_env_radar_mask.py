@@ -256,7 +256,7 @@ class XBotLRadarMaskEnv(LeggedRobot):
                     self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
                 
                 if getattr(self.cfg.joint_actuator_limp, "enabled", False) or getattr(self.cfg, "impact_failures", False):
-                    duration = getattr(self.cfg.joint_actuator_limp, "duration_steps", 50)
+                    duration = getattr(self.cfg.joint_actuator_limp, "duration_steps", 30)
                     self.joint_limp_timer[envs_to_trigger] = duration
                     self.joint_limp_idx[envs_to_trigger] = rand_joint
 
@@ -276,7 +276,7 @@ class XBotLRadarMaskEnv(LeggedRobot):
                     self.joint_vel_mask_idx[envs_to_trigger] = rand_joint
                 
                 if getattr(self.cfg.joint_actuator_limp, "enabled", False) or getattr(self.cfg, "impact_failures", False):
-                    duration = getattr(self.cfg.joint_actuator_limp, "duration_steps", 50)
+                    duration = getattr(self.cfg.joint_actuator_limp, "duration_steps", 30)
                     self.joint_limp_timer[envs_to_trigger] = duration
                     self.joint_limp_idx[envs_to_trigger] = rand_joint
 
