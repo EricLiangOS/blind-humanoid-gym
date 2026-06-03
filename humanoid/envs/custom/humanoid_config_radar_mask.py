@@ -51,6 +51,11 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         num_envs = 4096
         episode_length_s = 24     # episode length in seconds
         use_ref_actions = False   # speed up training by using reference actions
+        terminate_on_contacts = False
+        termination_height = 0.40
+        termination_roll = 1.35
+        termination_pitch = 1.35
+        termination_grace_steps = 20
     
     class radar:
         enabled = True
@@ -86,8 +91,8 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         foot_name = "ankle_roll"
         knee_name = "knee"
 
-        terminate_after_contacts_on = ['base_link']
-        penalize_contacts_on = ["base_link"]
+        terminate_after_contacts_on = []
+        penalize_contacts_on = []
         self_collisions = 0  # 1 to disable, 0 to enable...bitwise filter
         flip_visual_attachments = False
         replace_cylinder_with_capsule = False

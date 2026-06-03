@@ -92,9 +92,10 @@ def play(args):
         camera_properties.width = 1920
         camera_properties.height = 1080
         h1 = env.gym.create_camera_sensor(env.envs[0], camera_properties)
-        camera_offset = gymapi.Vec3(1, -1, 0.5)
-        camera_rotation = gymapi.Quat.from_axis_angle(gymapi.Vec3(-0.3, 0.2, 1),
-                                                    np.deg2rad(135))
+        camera_offset = gymapi.Vec3(2.5, -2.0, 1.4)
+        camera_rotation = gymapi.Quat.from_axis_angle(
+            gymapi.Vec3(-0.3, 0.2, 1),
+            np.deg2rad(135))
         actor_handle = env.gym.get_actor_handle(env.envs[0], 0)
         body_handle = env.gym.get_actor_rigid_body_handle(env.envs[0], actor_handle, 0)
         env.gym.attach_camera_to_body(
@@ -105,7 +106,10 @@ def play(args):
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         video_dir = os.path.join(LEGGED_GYM_ROOT_DIR, 'videos')
         experiment_dir = os.path.join(LEGGED_GYM_ROOT_DIR, 'videos', train_cfg.runner.experiment_name)
-        dir = os.path.join(experiment_dir, datetime.now().strftime('%b%d_%H-%M-%S')+ args.run_name + '.mp4')
+        run_name = args.run_name or ""
+        dir = os.path.join(
+            experiment_dir,
+            datetime.now().strftime('%b%d_%H-%M-%S') + run_name + '.mp4')
         if not os.path.exists(video_dir):
             os.mkdir(video_dir)
         if not os.path.exists(experiment_dir):

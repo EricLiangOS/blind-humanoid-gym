@@ -45,7 +45,12 @@ from .custom.humanoid_env_radar_mask import XBotLRadarMaskEnv
 from humanoid.utils.task_registry import task_registry
 
 
-task_registry.register( "humanoid_ppo", XBotLFreeEnv, XBotLCfg(), XBotLCfgPPO() )
+task_registry.register(
+    "humanoid_ppo",
+    XBotLRadarMaskEnv,
+    XBotLCfgRadarMask(),
+    XBotLCfgPPORadarMask()
+)
 
 task_registry.register(
     "humanoid_ppo_jointvel_mask",
