@@ -258,7 +258,7 @@ class XBotLCfgRadarMask(LeggedRobotCfg):
         clip_actions = 18.
     
     class joint_vel_mask:
-        enabled = True
+        enabled = False
 
         # probability per env per policy step of starting a new mask
         prob = 0.001
