@@ -215,6 +215,11 @@ class OnPolicyRunner:
         self.writer.add_scalar("Perf/learning_time", locs["learn_time"], locs["it"])
         self.writer.add_scalar("Perf/total_time", self.tot_time, locs["it"])
         self.writer.add_scalar("Perf/total_timesteps", self.tot_timesteps, locs["it"])
+        
+        # Log continuous x-axis metrics for curriculum tracking
+        global_steps = locs["it"] * self.num_steps_per_env * self.env.num_envs
+        self.writer.add_scalar("Train/iteration", locs["it"], locs["it"])
+        self.writer.add_scalar("Train/global_timesteps", global_steps, locs["it"])
         if len(locs["rewbuffer"]) > 0:
             self.writer.add_scalar(
                 "Train/mean_reward", statistics.mean(locs["rewbuffer"]), locs["it"]
