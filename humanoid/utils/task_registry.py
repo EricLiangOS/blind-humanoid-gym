@@ -134,6 +134,8 @@ class TaskRegistry():
                 print(f"'train_cfg' provided -> Ignoring 'name={name}'")
         # override cfg from args (if specified)
         _, train_cfg = update_cfg_from_args(None, train_cfg, args)
+        if getattr(args, "schedule", None) is None:
+            train_cfg.algorithm.schedule = 'fixed' if train_cfg.runner.resume else 'adaptive'
 
         if log_root=="default":
             log_root = os.path.join(LEGGED_GYM_ROOT_DIR, 'logs', train_cfg.runner.experiment_name)
@@ -155,7 +157,28 @@ class TaskRegistry():
             # load previously trained model
             resume_path = get_load_path(log_root, load_run=train_cfg.runner.load_run, checkpoint=train_cfg.runner.checkpoint)
             print(f"Loading model from: {resume_path}")
-            runner.load(resume_path, load_optimizer=False)
+            
+            # Detect if this is intra-stage resume vs curriculum stage transition
+            run_name = train_cfg.runner.run_name
+            is_same_phase = (run_name in resume_path) if run_name else False
+            
+            # Defaults
+            load_opt = is_same_phase
+            reset_std_val = -1.0 if is_same_phase else 0.6
+            
+            # CLI overrides
+            if getattr(args, "load_optimizer", False):
+                load_opt = True
+            if getattr(args, "reset_std", None) is not None:
+                reset_std_val = args.reset_std
+                
+            runner.load(resume_path, load_optimizer=load_opt)
+            print(f"Loaded optimizer state: {load_opt}")
+            
+            if reset_std_val > 0.0:
+                if hasattr(runner.alg.actor_critic, 'std'):
+                    runner.alg.actor_critic.std.data.fill_(reset_std_val)
+                    print(f"Reset action noise std to {reset_std_val} for exploration during resume.")
         return runner, train_cfg
 
 # make global task registry

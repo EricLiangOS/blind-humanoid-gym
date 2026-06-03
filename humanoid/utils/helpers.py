@@ -185,6 +185,8 @@ def update_cfg_from_args(env_cfg, cfg_train, args):
             cfg_train.runner.load_run = args.load_run
         if args.checkpoint is not None:
             cfg_train.runner.checkpoint = args.checkpoint
+        if getattr(args, "schedule", None) is not None:
+            cfg_train.algorithm.schedule = args.schedule
 
     return env_cfg, cfg_train
 
@@ -280,6 +282,24 @@ def get_args():
             "name": "--blink_radar",
             "type": str,
             "help": "Enable or disable radar sensor blinking (True/False)",
+        },
+        {
+            "name": "--load_optimizer",
+            "action": "store_true",
+            "default": False,
+            "help": "Load optimizer state when resuming (useful for extending a run within the same phase)",
+        },
+        {
+            "name": "--reset_std",
+            "type": float,
+            "default": None,
+            "help": "Reset policy std to this value when resuming. Set to a positive float to enable.",
+        },
+        {
+            "name": "--schedule",
+            "type": str,
+            "default": None,
+            "help": "Learning rate schedule ('fixed' or 'adaptive')",
         },
     ]
     # parse arguments

@@ -184,15 +184,13 @@ class OnPolicyRunner:
         ep_string = f""
         if locs["ep_infos"]:
             for key in locs["ep_infos"][0]:
-                infotensor = torch.tensor([], device=self.device)
+                values = []
                 for ep_info in locs["ep_infos"]:
-                    # handle scalar and zero dimensional tensor infos
-                    if not isinstance(ep_info[key], torch.Tensor):
-                        ep_info[key] = torch.Tensor([ep_info[key]])
-                    if len(ep_info[key].shape) == 0:
-                        ep_info[key] = ep_info[key].unsqueeze(0)
-                    infotensor = torch.cat((infotensor, ep_info[key].to(self.device)))
-                value = torch.mean(infotensor)
+                    val = ep_info[key]
+                    if isinstance(val, torch.Tensor):
+                        val = val.item()
+                    values.append(val)
+                value = statistics.mean(values)
                 self.writer.add_scalar("Episode/" + key, value, locs["it"])
                 ep_string += f"""{f'Mean episode {key}:':>{pad}} {value:.4f}\n"""
         mean_std = self.alg.actor_critic.std.mean()
