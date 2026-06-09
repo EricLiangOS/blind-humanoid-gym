@@ -1,224 +1,130 @@
-# <a href="https://sites.google.com/view/humanoid-gym/">Humanoid-Gym: Reinforcement Learning for Humanoid Robot with Zero-Shot Sim2Real Transfer</a>
+# BLIND: Bipedal Locomotion with Intermittent Navigation Data for Environmental Hazards
 
-<a href="https://sites.google.com/view/humanoid-gym/"><strong>Project Page</strong></a>
-  |
-  <a href="https://arxiv.org/abs/2404.05695"><strong>arXiv</strong></a>
-  |
-  <a href="https://twitter.com/roboterax/status/1765038672641175662"><strong>Twitter</strong></a>
+BLIND (*Bipedal Locomotion with Intermittent Navigation Data for Environmental Hazards*) is a reinforcement learning framework based on NVIDIA Isaac Gym, designed to train robust locomotion policies for humanoid robots (specifically RobotEra's XBot-L) under external hazards and internal failures.
 
-  <a href="https://github.com/zlw21gxy">Xinyang Gu*</a>, 
-  <a href="https://wangyenjen.github.io/">Yen-Jen Wang*</a>,
-  <a href="http://people.iiis.tsinghua.edu.cn/~jychen/">Jianyu Chen†</a>
+## 1. Project Overview & Motivation
+Standard reinforcement learning policies for humanoid locomotion are highly susceptible to out-of-distribution (OOD) disturbances. They typically assume perfect, continuous data from sensors and uninterrupted joint execution. In the real world, physical humanoids experience:
+* **Sensor noise and intermittent blackouts** (e.g., thermal sensor failures, camera visual occlusions).
+* **Actuator degradation** (e.g., motor saturation, joint limpness or freezing).
+* **External environmental hazards** (e.g., collisions, physical obstacles, projectile bombardment).
 
-  *: Equal contribution. Project Co-lead., †: Corresponding Author.
+**BLIND** introduces a framework that models system failures **causally** linked to environmental hazards. By training humanoid agents inside a three-stage curriculum with **"blinking"** (intermittent, randomized masking of sensors, actuators, and radar inputs), we force the policy to learn robust, multi-modal recovery behaviors and a distributed, resilient gait.
 
-![Demo](./images/demo.gif)
+## 2. Core Methodologies
+Our framework utilizes Proximal Policy Optimization (PPO) in an asymmetric Actor-Critic setup to control a 12-DoF RobotEra XBot-L humanoid robot.
 
-Humanoid-Gym is an easy-to-use reinforcement learning (RL) framework based on Nvidia Isaac Gym, designed to train locomotion skills for humanoid robots, emphasizing zero-shot transfer from simulation to the real-world environment. Humanoid-Gym also integrates a sim-to-sim framework from Isaac Gym to Mujoco that allows users to verify the trained policies in different physical simulations to ensure the robustness and generalization of the policies.
+### Asymmetric Actor-Critic
+* **Actor Observation (54D $\times$ 15 stacked frames = 810D)**: Proprioceptive joint states, base orientation, command vectors, and a 7D synthetic exteroceptive radar tracking incoming threats.
+* **Privileged Critic Observation (73D $\times$ 3 frames = 219D)**: Ground-truth states (e.g., actual velocities, contact forces, domain randomization parameters) to stabilize value estimation.
 
-This codebase is verified by RobotEra's XBot-S (1.2-meter tall humanoid robot) and XBot-L (1.65-meter tall humanoid robot) in a real-world environment with zero-shot sim-to-real transfer.
+### Procedural Projectiles
+Procedural 3 kg projectiles spawn dynamically on a 2.0 m radius cylinder centered around the robot's Center of Mass (CoM). They are fired at $7.5\text{ m/s}$ directly targeting the CoM, creating uniform impact coverage across all body segments.
 
-## Features
+### "Blinking" Failure Modes
+To teach the policy how to handle intermittent outages, we introduce three masking conditions:
+1. **Proprioceptive Sensor Dropout**: Zeroes out the velocity feedback of a randomly selected joint in the actor observation for $50$ steps ($0.5\text{ s}$).
+2. **Exteroceptive Radar Blackout**: Zeroes out the 7D radar tracking vector for $50$ steps, leaving the robot blind to incoming projectiles.
+3. **Actuator Limpness**: Sets the PD control gains ($K_p, K_d$) of a randomly selected joint to zero for $30$ steps ($0.3\text{ s}$), rendering the joint completely floppy.
 
-### 1. Humanoid Robot Training
-This repository offers comprehensive guidance and scripts for the training of humanoid robots. Humanoid-Gym features specialized rewards for humanoid robots, simplifying the difficulty of sim-to-real transfer. In this repository, we use RobotEra's XBot-L as a primary example. It can also be used for other robots with minimal adjustments. Our resources cover setup, configuration, and execution. Our goal is to fully prepare the robot for real-world locomotion by providing in-depth training and optimization.
+Blinking is triggered via two concurrent mechanisms:
+* **Stochastic background blinks**: Random activations during training based on configured step probabilities ($p_{\text{sensor}} = 0.01$, $p_{\text{radar}} = 0.01$, $p_{\text{actuator}} = 0.002$).
+* **Causal impact-based blinks**: Projectile collisions exceeding $10\text{ N}$ trigger localized failures (left-leg hits mask left-leg joints, right-leg hits mask right-leg joints, torso/head hits trigger radar blackouts).
 
+## 3. Three-Stage Curriculum Training
+Because direct training under high-intensity physical and sensory trauma is unstable, we employ a progressive curriculum:
 
-- **Comprehensive Training Guidelines**: We offer thorough walkthroughs for each stage of the training process.
-- **Step-by-Step Configuration Instructions**: Our guidance is clear and succinct, ensuring an efficient setup process.
-- **Execution Scripts for Easy Deployment**: Utilize our pre-prepared scripts to streamline the training workflow.
+* **Stage 1: Locomotion Baseline**: The policy is trained from scratch on flat ground without projectiles or blinking failures. This run is trained for 300 iterations (73.7M simulation steps) to establish a stable walking gait using the pre-allocated 54D observation size.
+* **Stage 2: Projectile Resilience**: Resuming from the Stage 1 baseline, we activate spherical projectile spawning and impact-triggered failures. The model is trained for 100 iterations (24.6M simulation steps) to adapt to constant physical perturbations.
+* **Stage 3: Blinking Training**: Resuming from the Stage 2 checkpoint, the robot is trained under different blinking configurations for 100 iterations (24.6M simulation steps) to learn recovery policies. In Stage 3, the training branches into five parallel configurations starting from the same Stage 2 checkpoint:
+  * **Branch A (Control)**: Projectiles remain active, but all blinking failure modes are disabled.
+  * **Branch B (Sensor Blink)**: Enables stochastic background proprioceptive joint velocity masking.
+  * **Branch C (Actuator Blink)**: Enables stochastic background joint actuator limpness.
+  * **Branch D (Radar Blink)**: Enables stochastic background exteroceptive radar masking.
+  * **Branch E (Combined Blinking)**: All three stochastic background blinking failure modes are simultaneously enabled.
 
-### 2. Sim2Sim Support
-We also share our sim2sim pipeline, which allows you to transfer trained policies to highly accurate and carefully designed simulated environments. Once you acquire the robot, you can confidently deploy the RL-trained policies in real-world settings.
+## 4. Repository Structure
+The core logic is implemented in the following modules:
+```
+blind-humanoid-gym/
+├── humanoid/
+│   ├── algo/                       # RL Algorithms
+│   │   └── ppo/                    # PPO implementation (actor_critic.py, ppo.py, on_policy_runner.py)
+│   ├── envs/                       # Task and Environment setups
+│   │   ├── base/
+│   │   │   ├── legged_robot.py     # Base physics and projectile spawn/impact queries
+│   │   │   └── legged_robot_config.py
+│   │   └── custom/
+│   │       ├── humanoid_config_radar_mask.py # Main configuration file (Stage 3 settings)
+│   │       └── humanoid_env_radar_mask.py    # Environment implementation for blinking & radar
+│   ├── scripts/                    # Entrypoint execution scripts
+│   │   ├── train.py                # Policy training entrypoint
+│   │   ├── play.py                 # Evaluation visualizer and video renderer
+│   │   └── eval_metrics.py         # Diagnostic benchmark and metrics calculator
+│   └── utils/                      # Math, registry, and helper utilities
+├── setup.py                        # Dependency configuration
+└── README_humanoid_gym.md          # Upstream repository documentation and installation details
+```
 
-Our simulator settings, particularly with Mujoco, are finely tuned to closely mimic real-world scenarios. This careful calibration ensures that the performances in both simulated and real-world environments are closely aligned. This improvement makes our simulations more trustworthy and enhances our confidence in their applicability to real-world scenarios.
+## 5. Installation Guide
+1. Create a Python virtual environment with Python 3.8:
+   ```bash
+   conda create -n blind-gym python=3.8
+   conda activate blind-gym
+   ```
+2. Install PyTorch 1.13 and CUDA 11.7:
+   ```bash
+   conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia
+   conda install numpy=1.23
+   ```
+3. Install NVIDIA Isaac Gym (Preview 4):
+   * Download from the [NVIDIA Isaac Gym Website](https://developer.nvidia.com/isaac-gym).
+   * Install via pip:
+     ```bash
+     cd isaacgym/python && pip install -e .
+     ```
+4. Install this repository and its dependencies (requires `numpy==1.23.5` and `mujoco==2.3.6`):
+   ```bash
+   pip install -e .
+   ```
 
+*(For detailed troubleshooting and hardware/driver compatibility, refer to README_humanoid_gym.md.)*
 
-### 3. Denoising World Model Learning
-#### Robotics: Science and Systems (RSS), 2024 (Best Paper Award Finalist)
-<a href="https://enriquecoronadozu.github.io/rssproceedings2024/rss20/p058.pdf"><strong>Paper</strong></a>
-|
-<a href="https://x.com/wangyenjen/status/1792741940087394540"><strong>Twitter</strong></a>
+## 6. Execution and Usage
 
-<a href="https://github.com/zlw21gxy">Xinyang Gu*</a>, 
-<a href="https://wangyenjen.github.io/">Yen-Jen Wang*</a>,
-Xiang Zhu*, Chengming Shi*, Yanjiang Guo, Yichen Liu,
-<a href="http://people.iiis.tsinghua.edu.cn/~jychen/">Jianyu Chen†</a>
+### Training Policies
+To train the policy, execute the `train.py` script. The task is registered under `humanoid_ppo_radar_mask` (utilizing the `XBotLRadarMaskEnv` class and the configuration `XBotLCfgRadarMask`). Note that `--task humanoid_ppo` and `--task humanoid_ppo_radar_mask` are identical and fully interchangeable:
 
-*: Equal contribution. Project Co-lead., †: Corresponding Author.
+* **Train Baseline from Scratch (Stage 1)**:
+  ```bash
+  python humanoid/scripts/train.py --task humanoid_ppo_radar_mask --run_name <baseline_run_name> --headless --num_envs 4096
+  ```
+* **Resume/Curriculum Transfer (Stage 2)**:
+  To load a saved run and continue training with projectiles enabled (loading a saved baseline checkpoint):
+  ```bash
+  python humanoid/scripts/train.py --task humanoid_ppo_radar_mask --resume --load_run <baseline_log_dir_name> --checkpoint <checkpoint_number> --run_name <stage2_run_name> --max_iterations 100 --projectiles True --impact_failures True --headless --num_envs 4096
+  ```
+  *(Note: Replace `<baseline_log_dir_name>` with the directory name under `logs/XBot_ppo/` containing your baseline run, e.g., `<date_time>_<run_name>`. Set `--checkpoint -1` to load the latest saved checkpoint.)*
+* **Train Blinking Branches (Stage 3)**:
+  To run a Stage 3 blinking branch starting from the Stage 2 checkpoint:
+  ```bash
+  python humanoid/scripts/train.py --task humanoid_ppo_radar_mask --resume --load_run <stage2_log_dir_name> --checkpoint <checkpoint_number> --run_name <stage3_run_name> --max_iterations 100 --projectiles True --impact_failures True --blink_actuators True --headless --num_envs 4096
+  ```
+  *(Note: Replace `--blink_actuators True` with other failure mode flags as needed: `--blink_sensors True` or `--blink_radar True`.)*
 
-Denoising World Model Learning(DWL) presents an advanced sim-to-real framework that integrates state estimation and system identification. This dual-method approach ensures the robot's learning and adaptation are both practical and effective in real-world contexts.
-
-- **Enhanced Sim-to-real Adaptability**: Techniques to optimize the robot's transition from simulated to real environments.
-- **Improved State Estimation Capabilities**: Advanced tools for precise and reliable state analysis.
-
-### Perceptive Locomotion Learning for Humanoid Robots (Coming Soon!)
-<a href="https://x.com/roboterax/status/1798694054374564010"><strong>Twitter</strong></a>
-
-### Dexterous Hand Manipulation (Coming Soon!)
-<a href="https://x.com/roboterax/status/1791349763448938924"><strong>Twitter</strong></a>
-
-## Installation
-
-1. Generate a new Python virtual environment with Python 3.8 using `conda create -n myenv python=3.8`.
-2. For the best performance, we recommend using NVIDIA driver version 525 `sudo apt install nvidia-driver-525`. The minimal driver version supported is 515. If you're unable to install version 525, ensure that your system has at least version 515 to maintain basic functionality.
-3. Install PyTorch 1.13 with Cuda-11.7:
-   - `conda install pytorch==1.13.1 torchvision==0.14.1 torchaudio==0.13.1 pytorch-cuda=11.7 -c pytorch -c nvidia`
-4. Install numpy-1.23 with `conda install numpy=1.23`.
-5. Install Isaac Gym:
-   - Download and install Isaac Gym Preview 4 from https://developer.nvidia.com/isaac-gym.
-   - `cd isaacgym/python && pip install -e .`
-   - Run an example with `cd examples && python 1080_balls_of_solitude.py`.
-   - Consult `isaacgym/docs/index.html` for troubleshooting.
-6. Install humanoid-gym:
-   - Clone this repository.
-   - `cd humanoid-gym && pip install -e .`
-
-
-
-## Usage Guide
-
-#### Examples
-
+### Evaluating & Rendering
+To render a checkpoint rollout in real-time or export an `.mp4` video (saved in `videos/`):
 ```bash
-# Under the directory humanoid-gym/humanoid
-# Launching PPO Policy Training for 'v1' Across 4096 Environments
-# This command initiates the PPO algorithm-based training for the humanoid task.
-python scripts/train.py --task=humanoid_ppo --run_name v1 --headless --num_envs 4096
-
-# Evaluating the Trained PPO Policy 'v1'
-# This command loads the 'v1' policy for performance assessment in its environment. 
-# Additionally, it automatically exports a JIT model, suitable for deployment purposes.
-python scripts/play.py --task=humanoid_ppo --run_name v1
-
-# Implementing Simulation-to-Simulation Model Transformation
-# This command facilitates a sim-to-sim transformation using exported 'v1' policy.
-# You have to run play.py first to get the JIT model and use it with sim2sim.py
-python scripts/sim2sim.py --load_model /path/to/logs/XBot_ppo/exported/policies/policy_1.pt
-
-# Run our trained policy
-python scripts/sim2sim.py --load_model /path/to/logs/XBot_ppo/exported/policies/policy_example.pt
-
+python humanoid/scripts/play.py --task humanoid_ppo_radar_mask --run_name <trained_run_name>
 ```
+*(Note: `play.py` automatically sets `resume = True` and loads the latest checkpoint in the specified run directory.)*
 
-#### 1. Default Tasks
-
-
-- **humanoid_ppo**
-   - Purpose: Baseline, PPO policy, Multi-frame low-level control
-   - Observation Space: Variable $(47 \times H)$ dimensions, where $H$ is the number of frames
-   - $[O_{t-H} ... O_t]$
-   - Privileged Information: $73$ dimensions
-
-- **humanoid_dwl (coming soon)**
-
-#### 2. PPO Policy
-- **Training Command**: For training the PPO policy, execute:
+### Metrics Diagnostics
+To compile performance statistics (Mean Reward, Survival Time, Fall Rate, etc.) over a 100-episode sweep, you **must** specify either `--resume` (to load the latest checkpoint of a run) or a direct `--checkpoint-path`:
+* **Using run name**:
+  ```bash
+  python humanoid/scripts/eval_metrics.py --task humanoid_ppo_radar_mask --run_name <trained_run_name> --resume --episodes 100
   ```
-  python humanoid/scripts/train.py --task=humanoid_ppo --load_run log_file_path --name run_name
+* **Using direct checkpoint path**:
+  ```bash
+  python humanoid/scripts/eval_metrics.py --task humanoid_ppo_radar_mask --checkpoint-path logs/XBot_ppo/<run_dir_name>/model_<checkpoint_number>.pt --episodes 100
   ```
-- **Running a Trained Policy**: To deploy a trained PPO policy, use:
-  ```
-  python humanoid/scripts/play.py --task=humanoid_ppo --load_run log_file_path --name run_name
-  ```
-- By default, the latest model of the last run from the experiment folder is loaded. However, other run iterations/models can be selected by adjusting `load_run` and `checkpoint` in the training config.
-
-#### 3. Sim-to-sim
-- **Please note: Before initiating the sim-to-sim process, ensure that you run `play.py` to export a JIT policy.**
-- **Mujoco-based Sim2Sim Deployment**: Utilize Mujoco for executing simulation-to-simulation (sim2sim) deployments with the command below:
-  ```
-  python scripts/sim2sim.py --load_model /path/to/export/model.pt
-  ```
-
-
-#### 4. Parameters
-- **CPU and GPU Usage**: To run simulations on the CPU, set both `--sim_device=cpu` and `--rl_device=cpu`. For GPU operations, specify `--sim_device=cuda:{0,1,2...}` and `--rl_device={0,1,2...}` accordingly. Please note that `CUDA_VISIBLE_DEVICES` is not applicable, and it's essential to match the `--sim_device` and `--rl_device` settings.
-- **Headless Operation**: Include `--headless` for operations without rendering.
-- **Rendering Control**: Press 'v' to toggle rendering during training.
-- **Policy Location**: Trained policies are saved in `humanoid/logs/<experiment_name>/<date_time>_<run_name>/model_<iteration>.pt`.
-
-#### 5. Command-Line Arguments
-For RL training, please refer to `humanoid/utils/helpers.py#L161`.
-For the sim-to-sim process, please refer to `humanoid/scripts/sim2sim.py#L169`.
-
-## Code Structure
-
-1. Every environment hinges on an `env` file (`legged_robot.py`) and a `configuration` file (`legged_robot_config.py`). The latter houses two classes: `LeggedRobotCfg` (encompassing all environmental parameters) and `LeggedRobotCfgPPO` (denoting all training parameters).
-2. Both `env` and `config` classes use inheritance.
-3. Non-zero reward scales specified in `cfg` contribute a function of the corresponding name to the sum-total reward.
-4. Tasks must be registered with `task_registry.register(name, EnvClass, EnvConfig, TrainConfig)`. Registration may occur within `envs/__init__.py`, or outside of this repository.
-
-
-## Add a new environment 
-
-The base environment `legged_robot` constructs a rough terrain locomotion task. The corresponding configuration does not specify a robot asset (URDF/ MJCF) and no reward scales.
-
-1. If you need to add a new environment, create a new folder in the `envs/` directory with a configuration file named `<your_env>_config.py`. The new configuration should inherit from existing environment configurations.
-2. If proposing a new robot:
-    - Insert the corresponding assets in the `resources/` folder.
-    - In the `cfg` file, set the path to the asset, define body names, default_joint_positions, and PD gains. Specify the desired `train_cfg` and the environment's name (python class).
-    - In the `train_cfg`, set the `experiment_name` and `run_name`.
-3. If needed, create your environment in `<your_env>.py`. Inherit from existing environments, override desired functions and/or add your reward functions.
-4. Register your environment in `humanoid/envs/__init__.py`.
-5. Modify or tune other parameters in your `cfg` or `cfg_train` as per requirements. To remove the reward, set its scale to zero. Avoid modifying the parameters of other environments!
-6. If you want a new robot/environment to perform sim2sim, you may need to modify `humanoid/scripts/sim2sim.py`: 
-    - Check the joint mapping of the robot between MJCF and URDF.
-    - Change the initial joint position of the robot according to your trained policy.
-
-## Troubleshooting
-
-Observe the following cases:
-
-```bash
-# error
-ImportError: libpython3.8.so.1.0: cannot open shared object file: No such file or directory
-
-# solution
-# set the correct path
-export LD_LIBRARY_PATH="~/miniconda3/envs/your_env/lib:$LD_LIBRARY_PATH" 
-
-# OR
-sudo apt install libpython3.8
-
-# error
-AttributeError: module 'distutils' has no attribute 'version'
-
-# solution
-# install pytorch 1.12.0
-conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch
-
-# error, results from libstdc++ version distributed with conda differing from the one used on your system to build Isaac Gym
-ImportError: /home/roboterax/anaconda3/bin/../lib/libstdc++.so.6: version `GLIBCXX_3.4.20` not found (required by /home/roboterax/carbgym/python/isaacgym/_bindings/linux64/gym_36.so)
-
-# solution
-mkdir ${YOUR_CONDA_ENV}/lib/_unused
-mv ${YOUR_CONDA_ENV}/lib/libstdc++* ${YOUR_CONDA_ENV}/lib/_unused
-```
-
-## Citation
-
-Please cite the following if you use this code or parts of it:
-```
-@article{gu2024humanoid,
-  title={Humanoid-Gym: Reinforcement Learning for Humanoid Robot with Zero-Shot Sim2Real Transfer},
-  author={Gu, Xinyang and Wang, Yen-Jen and Chen, Jianyu},
-  journal={arXiv preprint arXiv:2404.05695},
-  year={2024}
-}
-
-@inproceedings{gu2024advancing,
-  title={Advancing Humanoid Locomotion: Mastering Challenging Terrains with Denoising World Model Learning},
-  author={Gu, Xinyang and Wang, Yen-Jen and Zhu, Xiang and Shi, Chengming and Guo, Yanjiang and Liu, Yichen and Chen, Jianyu},
-  booktitle={Robotics: Science and Systems},
-  year={2024},
-  url={https://enriquecoronadozu.github.io/rssproceedings2024/rss20/p058.pdf}
-}
-```
-
-## Acknowledgment
-
-The implementation of Humanoid-Gym relies on resources from [legged_gym](https://github.com/leggedrobotics/legged_gym) and [rsl_rl](https://github.com/leggedrobotics/rsl_rl) projects, created by the Robotic Systems Lab. We specifically utilize the `LeggedRobot` implementation from their research to enhance our codebase.
-
-## Any Questions?
-
-If you have any more questions, please contact [support@robotera.com](mailto:support@robotera.com) or create an issue in this repository.
