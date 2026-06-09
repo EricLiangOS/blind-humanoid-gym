@@ -1,6 +1,6 @@
 # BLIND: Bipedal Locomotion with Intermittent Navigation Data for Environmental Hazards
 
-BLIND (*Bipedal Locomotion with Intermittent Navigation Data for Environmental Hazards*) is a reinforcement learning framework based on NVIDIA Isaac Gym, designed to train robust locomotion policies for humanoid robots (specifically RobotEra's XBot-L) under external hazards and internal failures.
+BLIND (*Bipedal Locomotion with Intermittent Navigation Data for Environmental Hazards*) is a reinforcement learning framework based on NVIDIA Isaac Gym, designed to train robust locomotion policies for humanoid robots (specifically RobotEra's XBot-L) under external hazards and internal failures. This codebase builds directly upon the foundational architecture established in [*Humanoid-Gym: Reinforcement Learning for Humanoid Robot with Zero-Shot Sim2Real Transfer*](https://arxiv.org/abs/2404.05695).
 
 ## 1. Project Overview & Motivation
 Standard reinforcement learning policies for humanoid locomotion are highly susceptible to out-of-distribution (OOD) disturbances. They typically assume perfect, continuous data from sensors and uninterrupted joint execution. In the real world, physical humanoids experience:
